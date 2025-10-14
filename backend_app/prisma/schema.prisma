@@ -1,0 +1,183 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+//////////////////////////
+// Enums
+//////////////////////////
+enum GAME_STATUS {
+  PENDING
+  ACTIVE
+  FINISHED
+}
+
+enum GAME_TYPE {
+  TIC_TAC_TOE
+  PENALTY
+  CHESS
+}
+
+enum TRANSACTION_TYPE {
+  DEPOSIT
+  WITHDRAWAL
+  BET
+  WIN
+  GIFT
+}
+
+//////////////////////////
+// Models
+//////////////////////////
+
+model User {
+  id         String   @id @default(uuid()) @map("id") @db.Uuid
+  telegramId String   @unique @map("telegram_id")
+  username   String?  @map("username")
+  firstName  String?  @map("first_name")
+  lastName   String?  @map("last_name")
+  photoUrl   String?  @map("photo_url")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  userStatus          UserStatus?
+  wallet              Wallet?
+  plays               GamePlayer[]
+  gameInvitesReceived GameInvite[] @relation("GameInvitesReceived")
+  gameInvitesSent     GameInvite[] @relation("GameInvitesSent")
+
+  @@index([username])
+  @@map("users")
+}
+
+model UserStatus {
+  userId       String   @id @map("user_id") @db.Uuid
+  user         User     @relation(fields: [userId], references: [id])
+  isSuspended  Boolean  @default(false) @map("is_suspended")
+  isBanned     Boolean  @default(false) @map("is_banned")
+  isVerified   Boolean  @default(false) @map("is_verified")
+  warningCount Int      @default(0) @map("warning_count")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([isSuspended])
+  @@index([isBanned])
+  @@index([isVerified])
+  @@map("user_status")
+}
+
+model Wallet {
+  id           String        @id @default(uuid()) @map("id") @db.Uuid
+  userId       String        @unique @map("user_id") @db.Uuid
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  balance      Float         @default(0)
+  currency     String        @default("ETB")
+  transactions Transaction[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("wallets")
+}
+
+model Transaction {
+  id        String           @id @default(uuid()) @map("id") @db.Uuid
+  walletId  String           @map("wallet_id") @db.Uuid
+  wallet    Wallet           @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  type      TRANSACTION_TYPE @map("type")
+  amount    Float            @map("amount")
+  gameId    String?          @map("game_id") @db.Uuid
+  game      Game?            @relation(fields: [gameId], references: [id], onDelete: SetNull)
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  @@index([walletId])
+  @@index([gameId])
+  @@map("transactions")
+}
+
+model GameConfig {
+  id            String    @id @default(uuid()) @map("id") @db.Uuid
+  gameType      GAME_TYPE @unique @map("game_type")
+  minPlayers    Int       @default(2) @map("min_players")
+  maxPlayers    Int       @default(2) @map("max_players")
+  isActive      Boolean   @default(true) @map("is_active")
+  serviceCharge Float     @default(0) @map("service_charge")
+  expiresAt     DateTime  @default(dbgenerated("NOW() + INTERVAL '1 day'")) @map("expires_at")
+  round         Int       @default(2)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("game_config")
+}
+
+model Game {
+  id     String      @id @default(uuid()) @map("id") @db.Uuid
+  type   GAME_TYPE   @map("type")
+  status GAME_STATUS @default(PENDING) @map("status")
+  state  Json?       @map("state")
+  round  Int         @default(1)
+
+  startedAt DateTime?
+  winnerId  String?     @unique @map("winner_id") @db.Uuid
+  winner    GamePlayer? @relation("Winner", fields: [winnerId], references: [id])
+
+  players      GamePlayer[]
+  transactions Transaction[]
+
+  // ✅ ADD @unique BACK — One invite → One game (correct)
+  gameInviteId String     @unique @map("game_invite_id") @db.Uuid
+  gameInvite   GameInvite @relation(fields: [gameInviteId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@index([type])
+  @@index([gameInviteId])
+  @@map("games")
+}
+
+model GamePlayer {
+  id          String  @id @default(uuid()) @map("id") @db.Uuid
+  userId      String  @map("user_id") @db.Uuid
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gameId      String  @map("game_id") @db.Uuid
+  game        Game    @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  role        String?
+  winningGame Game?   @relation("Winner")
+
+  @@unique([userId, gameId])
+  @@index([gameId])
+  @@map("game_players")
+}
+
+model GameInvite {
+  id         String    @id @default(uuid()) @map("id") @db.Uuid
+  game       Game?
+  fromUserId String    @map("from_user_id") @db.Uuid
+  fromUser   User      @relation("GameInvitesSent", fields: [fromUserId], references: [id])
+  toUsers    User[]    @relation("GameInvitesReceived")
+  gameType   GAME_TYPE @map("game_type")
+  bet        Float     @default(5) @map("bet")
+
+  minPlayers Int           @default(2) @map("min_players")
+  status     INVITE_STATUS @default(PENDING) @map("status")
+  acceptedAt DateTime?     @map("accepted_at")
+  declinedAt DateTime?     @map("declined_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([status])
+  @@map("game_invites")
+}
+
+enum INVITE_STATUS {
+  PENDING
+  ACCEPTED
+  DECLINED
+}
